@@ -1,6 +1,7 @@
 // osmupdate 2012-05-14 10:50
 #define VERSION "0.2K"
 // (c) 2011 Markus Weber, Nuernberg
+// hacks (c) 2012 James Michael DuPont
 //
 // This program is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Affero General Public License
@@ -13,6 +14,8 @@
 // with this program; if not, see http://www.gnu.org/licenses/.
 //
 // Other licenses are available on request; please ask the author.
+
+int runwget=1; // debug
 
 #define MAXLOGLEVEL 2
 const char* helptext=
@@ -231,7 +234,6 @@ static inline char *stecpy(char** destp, char* destend,
 static inline char *stpesccpy(char *dest, const char *src) {
   // same as C99's stpcpy(), but all quotation marks, apostrophes
   // and backslashes will be escaped (i.e., preceded) by backslashes;
-  // for windows, backslashes will not be escaped;
   while(*src!=0) {
     if(*src=='\'' || *src=='\"'
 
@@ -445,10 +447,6 @@ static inline int64_t file_length(const char* file_name) {
   r= stat(file_name,&s);
   if(r==0)
     return s.st_size;
-#if !__WIN32__
-  if(errno==EOVERFLOW)  // size larger than 2^31
-    return 0x7fffffff;
-#endif
   return -1;
 }  // end   file_length()
 
@@ -468,7 +466,7 @@ static char global_tempfile_name[450]= "";
 static bool global_keep_tempfiles= false;
 // temporary files shall not be deleted at program end
 
-#define max_number_of_changefiles_in_cache 100
+#define max_number_of_changefiles_in_cache 10000
 static int global_max_merge= 7;
 // maximum number of parallely processed changefiles
 static const char* global_gzip_parameters= "";
@@ -510,9 +508,10 @@ static void shell_command(const char* command,char* result) {
   int maxlen;
   int r;
 
-  if(loglevel>=2)
-    PINFOv("Executing shell command:\n%s",command)
-      fp= popen(command,"r");
+  if(loglevel>=2) {
+    PINFOv("Executing shell command:\n%s",command);
+  }
+  fp= popen(command,"r");
   if(fp==NULL) {
     PERR("Could not execute shell command.")
       result[0]= 0;
@@ -529,19 +528,16 @@ static void shell_command(const char* command,char* result) {
   }
   *result_p= 0;
   pclose(fp);
-  if(loglevel>=2)
-    PINFOv("Got shell command result:\n%s",result)
-      }  // end   shell_command()
+  if(loglevel>=2) {
+    PINFOv("Got shell command result:\n%s",result);
+  }
+}  // end   shell_command()
 
-typedef enum {cft_UNKNOWN,cft_MINUTELY,cft_HOURLY,cft_DAILY}
-  changefile_type_t;
-#define CFTNAME(i)						\
-  (i==cft_MINUTELY? "minutely": i==cft_HOURLY? "hourly":	\
-   i==cft_DAILY? "daily": "unknown")
+typedef enum {cft_UNKNOWN,cft_MINUTELY,cft_HOURLY,cft_DAILY} changefile_type_t;
+#define CFTNAME(i)    (i==cft_MINUTELY? "minutely": i==cft_HOURLY? "hourly":    i==cft_DAILY? "daily": "unknown")
 
 
-static int64_t get_newest_changefile_timestamp(
-					       changefile_type_t changefile_type,int32_t* file_sequence_number) {
+static int64_t get_newest_changefile_timestamp(changefile_type_t changefile_type,int32_t* file_sequence_number) {
   // get sequence number and timestamp of the newest changefile
   // of a specific changefile type;
   // changefile_type: minutely, hourly or daily changefile;
@@ -554,9 +550,10 @@ static int64_t get_newest_changefile_timestamp(
   char result[1000];
   int64_t changefile_timestamp;
 
+
+  // first run
   command_p= command;
-  stecpy(&command_p,command_e,
-	 "wget -q ");
+  stecpy(&command_p,command_e,	 "wget -q ");
   stecpy(&command_p,command_e,global_planet_url);
   switch(changefile_type) {  // changefile type
   case cft_MINUTELY:
@@ -572,8 +569,8 @@ static int64_t get_newest_changefile_timestamp(
     return 0;
   }  // changefile type
   stecpy(&command_p,command_e," -O - 2>&1");
-
   shell_command(command,result);
+
   if(firstrun) {  // first run
     firstrun= false;
     if(result[0]!='#' && (result[0]<'1' || result[0]>'2') && (
@@ -583,22 +580,6 @@ static int64_t get_newest_changefile_timestamp(
 	exit(1);
     }  // command not found
   }  // first run
-#if __WIN32__
-  result[0]= 0;
-  /* copy tempfile contents to result[] */ {
-    int fd,r;
-
-    fd= open(newest_timestamp_file_name,O_RDONLY);
-    if(fd>0) {
-      r= read(fd,result,sizeof(result)-1);
-      if(r>=0)
-	result[r]= 0;
-      close(fd);
-    }
-  }
-  if(loglevel<2)
-    unlink(newest_timestamp_file_name);
-#endif
   if(result[0]=='#') {  // full status information
     // get sequence number
     char* sequence_number_p;
@@ -725,8 +706,14 @@ static int64_t get_changefile_timestamp(
       strcpy(ts,"(no timestamp)");
     else
       int64tostrtime(changefile_timestamp,ts);
-    PINFOv("%s changefile %i: %s",
-	   CFTNAME(changefile_type),file_sequence_number,ts)
+
+
+    printf("%s", CFTNAME(changefile_type));
+    printf(" changefile %i",file_sequence_number);
+    printf(": %s\n",ts);
+
+    //    PINFOv("%s changefile %i: %s",	   CFTNAME(changefile_type),file_sequence_number,ts)
+
       }  // verbose mode
   if(changefile_timestamp==0) {  // no timestamp
     if(file_sequence_number==0)  // first file in repository
@@ -740,9 +727,65 @@ static int64_t get_changefile_timestamp(
   return changefile_timestamp;
 }  // get_changefile_timestamp
 
-static void process_changefile(
-			       changefile_type_t changefile_type,int32_t file_sequence_number,
-			       int64_t new_timestamp) {
+static void wget_changefile (changefile_type_t changefile_type,
+		      int32_t file_sequence_number,
+		      const char * this_cachefile_name
+		      )
+{
+  char command[1000],*command_p;
+  char* command_e= command+sizeof(command);
+  command_p= command;
+
+  stecpy(&command_p,command_e,"wget -nv -c ");
+  stecpy(&command_p,command_e,global_planet_url);
+  
+  switch(changefile_type) {  // changefile type
+  case cft_MINUTELY:
+    stecpy(&command_p,command_e,"minute-replicate/");
+    break;
+  case cft_HOURLY:
+    stecpy(&command_p,command_e,"hour-replicate/");
+    break;
+  case cft_DAILY:
+    stecpy(&command_p,command_e,"day-replicate/");
+    break;
+  default:  // invalid change file type
+    return;
+  }  // changefile type
+  
+  /* process sequence number */ 
+  {
+    int l;
+    l= sprintf(command_p,"%03i/%03i/%03i.osc.gz",
+	       file_sequence_number/1000000,file_sequence_number/1000%1000,
+	       file_sequence_number%1000);
+    command_p+= l;
+  }  // process sequence number
+  
+  stecpy(&command_p,command_e," -O \"");
+  steesccpy(&command_p,command_e,this_cachefile_name);
+  stecpy(&command_p,command_e,"\" 2>&1 && echo \"Wget Command Ok\"");
+  
+  if (runwget){
+    char result[1000];
+
+    shell_command(command,result);
+    if(strstr(result,"Wget Command Ok")==NULL) {  // download error
+      PERRv("Could not download %s changefile %i",
+	    CFTNAME(changefile_type),file_sequence_number)
+	PINFOv("wget Error message:\n%s",result)
+	exit(1);
+    }      
+    }
+  else
+    {
+      printf("Skipping running %s\n",command);
+    }
+}
+
+
+static void process_changefile(changefile_type_t changefile_type,int32_t file_sequence_number, int64_t new_timestamp) 
+{
   // download and process a change file;
   // change files will not be processed one by one, but cumulated
   // until some files have been downloaded and then processed in a group;
@@ -783,6 +826,7 @@ static void process_changefile(
   }
   if(new_timestamp>newest_new_timestamp)
     newest_new_timestamp= new_timestamp;
+
   if(file_sequence_number!=0) {  // changefile download requested
     char* this_cachefile_name=
       cachefile_name[number_of_changefiles_in_cache];
@@ -801,106 +845,41 @@ static void process_changefile(
 
     // assemble the URL and download the changefile
     old_file_length= file_length(this_cachefile_name);
-    if(loglevel>0 && old_file_length<10)
-      // verbose mode AND file not downloaded yet
-      PINFOv("%s changefile %i: downloading",
-	     CFTNAME(changefile_type),file_sequence_number)
-	command_p= command;
-    stecpy(&command_p,command_e,"wget -nv -c ");
-    stecpy(&command_p,command_e,global_planet_url);
-    switch(changefile_type) {  // changefile type
-    case cft_MINUTELY:
-      stecpy(&command_p,command_e,"minute-replicate/");
-      break;
-    case cft_HOURLY:
-      stecpy(&command_p,command_e,"hour-replicate/");
-      break;
-    case cft_DAILY:
-      stecpy(&command_p,command_e,"day-replicate/");
-      break;
-    default:  // invalid change file type
-      return;
-    }  // changefile type
 
-    /* process sequence number */ {
-      int l;
-      l= sprintf(command_p,"%03i/%03i/%03i.osc.gz",
-		 file_sequence_number/1000000,file_sequence_number/1000%1000,
-		 file_sequence_number%1000);
-      command_p+= l;
-    }  // process sequence number
-
-    stecpy(&command_p,command_e," -O \"");
-    steesccpy(&command_p,command_e,this_cachefile_name);
-    stecpy(&command_p,command_e,"\" 2>&1 && echo \"Wget Command Ok\"");
-    shell_command(command,result);
-    if(strstr(result,"Wget Command Ok")==NULL) {  // download error
-      PERRv("Could not download %s changefile %i",
-	    CFTNAME(changefile_type),file_sequence_number)
-	PINFOv("wget Error message:\n%s",result)
-	exit(1);
-    }
-    if(loglevel>0 && old_file_length>=10) {
-      // verbose mode AND file was already in cache
-      if(file_length(this_cachefile_name)!=old_file_length)
+    
+    if(loglevel>0 && old_file_length == 0) 
+      {
+	
+	//	if(loglevel>0 && old_file_length<10)       
+	// verbose mode AND file not downloaded yet
+	PINFOv("%s changefile %i: downloading",    CFTNAME(changefile_type),file_sequence_number);
+	
+	wget_changefile (changefile_type,
+			 file_sequence_number,
+			 this_cachefile_name
+			 );
+	
         PINFOv("%s changefile %i: download completed",
 	       CFTNAME(changefile_type),file_sequence_number)
-	else
-	  PINFOv("%s changefile %i: already in cache",
-		 CFTNAME(changefile_type),file_sequence_number)
-	    }  // verbose mode
+	  }
+    else 
+      {
+	const char * typename=CFTNAME(changefile_type);
+	
+	printf("%s changefile %i: already in cache\n", typename,file_sequence_number);
+      }
+    
     number_of_changefiles_in_cache++;
+    if (number_of_changefiles_in_cache > max_number_of_changefiles_in_cache)
+      {
+	printf("overflow %d\n",number_of_changefiles_in_cache);
+	exit(999);
+      }
   }  // changefile download requested
+  
 
-  if(number_of_changefiles_in_cache>=global_max_merge
-     || (file_sequence_number==0 && number_of_changefiles_in_cache>0)) {
-    // at least one change files must be merged
-    // merge all changefiles which are waiting in cache
-
-
-
-    while(number_of_changefiles_in_cache>0) {
-      // for all changefiles in cache
-      number_of_changefiles_in_cache--;
-      stecpy(&command_p,command_e," \"");
-      steesccpy(&command_p,command_e,
-		cachefile_name[number_of_changefiles_in_cache]);
-      stecpy(&command_p,command_e,"\"");
-    }  // for all changefiles in cache
-    if(file_exists(master_cachefile_name)) {
-      stecpy(&command_p,command_e," \"");
-      steesccpy(&command_p,command_e,master_cachefile_name);
-      stecpy(&command_p,command_e,"\"");
-    }
-    if(newest_new_timestamp!=0) {
-      stecpy(&command_p,command_e," --timestamp=");
-      if(command_e-command_p>=30)
-        int64tostrtime(newest_new_timestamp,command_p);
-      command_p= strchr(command_p,0);
-    }
-    stecpy(&command_p,command_e," --out-o5c >\"");
-    steesccpy(&command_p,command_e,master_cachefile_name_temp);
-    stecpy(&command_p,command_e,"\"");
-    shell_command(command,result);
-    if(file_length(master_cachefile_name_temp)<10 ||
-       strstr(result,"Error")!=NULL ||
-       strstr(result,"error")!=NULL) {  // merging failed
-      PERRv("Merging of changefiles failed:\n%s",command)
-	if(result[0]!=0)
-	  PERRv("%s",result)
-	    exit(1);
-    }  // merging failed
-    unlink(master_cachefile_name);
-    rename(master_cachefile_name_temp,master_cachefile_name);
-  }  // at lease one change files must be merged
 }  // process_changefile()
 
-#if !__WIN32__
-void sigcatcher(int sig) {
-  fprintf(stderr,"osmupdate: Output has been terminated.\n");
-  exit(1);
-}  // end   sigchatcher()
-#endif
 
 int main(int argc,const char** argv) {
   // main procedure;
@@ -938,24 +917,10 @@ int main(int argc,const char** argv) {
   int64_t next_timestamp;
 
   // care about clean-up procedures
-#if !__WIN32__
-  /* care about signal handler */ {
-    static struct sigaction siga;
-
-    siga.sa_handler= sigcatcher;
-    sigemptyset(&siga.sa_mask);
-    siga.sa_flags= 0;
-    sigaction(SIGPIPE,&siga,NULL);
-  }
-#endif
   //atexit(restore_timezone); ,,,
 
   // initializations
   main_return_value= 0;  // (default)
-#if __WIN32__
-  setmode(fileno(stdout),O_BINARY);
-  setmode(fileno(stdin),O_BINARY);
-#endif
 
   old_file= NULL;
   old_timestamp= 0;
@@ -977,6 +942,8 @@ int main(int argc,const char** argv) {
     return 0;  // end the program, because without having parameters
     // we do not know what to do;
   }
+
+
   while(--argc>0) {  // for every parameter in command line
     argv++;  // switch to next parameter; as the first one is just
     // the program name, we must do this prior reading the
@@ -1128,231 +1095,211 @@ int main(int argc,const char** argv) {
     new_file_is_gz= strycmp(new_file,".gz")==0;
   }
 
-/* create tempfile directory for cached timestamps and changefiles */ 
-    {
-      char *sp;
+  /* create tempfile directory for cached timestamps and changefiles */ 
+  {
+    char *sp;
 
-      if(strlen(global_tempfile_name)<2)  // not set yet
-	strcpy(global_tempfile_name,"osmupdate_temp"DIRSEPS"temp");
-      // take default
-      sp= strchr(global_tempfile_name,0);
-      if(sp[-1]==DIRSEP)  // it's a bare directory
-	strcpy(sp,"temp");  // add a file name prefix
-      strMcpy(tempfile_directory,global_tempfile_name);
-      sp= strrchr(tempfile_directory,DIRSEP);
-      // get last directory separator
-      if(sp!=NULL) *sp= 0;  // if found any, cut the string here
-#if __WIN32__
-      mkdir(tempfile_directory);
-#else
-      mkdir(tempfile_directory,0700);
-#endif
+    if(strlen(global_tempfile_name)<2)  // not set yet
+      strcpy(global_tempfile_name,"osmupdate_temp"DIRSEPS"temp");
+    // take default
+    sp= strchr(global_tempfile_name,0);
+    if(sp[-1]==DIRSEP)  // it's a bare directory
+      strcpy(sp,"temp");  // add a file name prefix
+    strMcpy(tempfile_directory,global_tempfile_name);
+    sp= strrchr(tempfile_directory,DIRSEP);
+    // get last directory separator
+    if(sp!=NULL) *sp= 0;  // if found any, cut the string here
+    mkdir(tempfile_directory,0700);
+
+  }
+
+  // get file timestamp of OSM input file
+  if(old_timestamp==0) {  // no timestamp given by the user
+    if(old_file==NULL) {  // no file name given for the old OSM file
+      PERR("Specify at least the old OSM file's name or its timestamp.")
+	return 1;
+    }
+    if(!file_exists(old_file)) {  // old OSM file does not exist
+      PERRv("Old OSM file does not exist: %.80s",old_file);
+      return 1;
     }
 
-// get file timestamp of OSM input file
-if(old_timestamp==0) {  // no timestamp given by the user
-  if(old_file==NULL) {  // no file name given for the old OSM file
-    PERR("Specify at least the old OSM file's name or its timestamp.")
-      return 1;
-  }
-  if(!file_exists(old_file)) {  // old OSM file does not exist
-    PERRv("Old OSM file does not exist: %.80s",old_file);
+
+  }  // end   no timestamp given by the user
+
+  // parameter consistency check
+  if(new_file==NULL) {
+    PERR("No output file was specified.");
     return 1;
   }
 
-
- }  // end   no timestamp given by the user
-
-// parameter consistency check
-if(new_file==NULL) {
-  PERR("No output file was specified.");
-  return 1;
- }
-
-if(old_file==NULL && !new_file_is_changefile) {
-  PERR("If no old OSM file is specified, osmupdate can only "
-       "generate a changefile.");
-  return 1;
- }
-
-// care about user defined processing categories
-if(process_minutely || process_hourly || process_daily) {
-  if(!process_minutely) no_minutely= true;
-  if(!process_hourly) no_hourly= true;
-  if(!process_daily) no_daily= true;
- }
-
-// get last timestamp for each, minutely, hourly and daily diff files
-minutely_sequence_number= hourly_sequence_number=
-  daily_sequence_number= 0;
-minutely_timestamp= hourly_timestamp= daily_timestamp= 0;
-if(!no_minutely) {
-  minutely_timestamp= get_newest_changefile_timestamp(
-						      cft_MINUTELY,&minutely_sequence_number);
-  if(minutely_timestamp==0) {
-    PERR("Could not get the newest minutely timestamp from the Internet.")
-      return 1;
-  }
- }
-if(!no_hourly) {
-  hourly_timestamp= get_newest_changefile_timestamp(
-						    cft_HOURLY,&hourly_sequence_number);
-  if(hourly_timestamp==0) {
-    PERR("Could not get the newest hourly timestamp from the Internet.")
-      return 1;
-  }
- }
-if(!no_daily) {
-  daily_timestamp= get_newest_changefile_timestamp(
-						   cft_DAILY,&daily_sequence_number);
-  if(daily_timestamp==0) {
-    PERR("Could not get the newest daily timestamp from the Internet.")
-      return 1;
-  }
- }
-
-// check maximum update range
-if(minutely_timestamp-old_timestamp>max_update_range) {
-  // update range too large
-  int days;
-  days= (int)((minutely_timestamp-old_timestamp+86399)/86400);
-  PERRv("Update range too large: %i days.",days)
-    PINFOv("To allow such a wide range, add: --max-days=%i",days)
+  if(old_file==NULL && !new_file_is_changefile) {
+    PERR("If no old OSM file is specified, osmupdate can only "
+	 "generate a changefile.");
     return 1;
- }  // update range too large
-
-// clear last hourly timestamp if
-// OSM old file's timestamp > latest hourly timestamp - 30 minutes
-if(old_timestamp>hourly_timestamp-30*60 && !no_minutely)
-  hourly_timestamp= 0;  // (let's take minutely updates)
-
-// clear last daily timestamp if
-// OSM file timestamp > latest daily timestamp - 16 hours
-if(old_timestamp>daily_timestamp-16*3600 &&
-   !(no_hourly && no_minutely))
-  daily_timestamp= 0;  // (let's take hourly and minutely updates)
-
-// initialize start timestamp
-timestamp= 0;
-if(timestamp<minutely_timestamp) timestamp= minutely_timestamp;
-if(timestamp<hourly_timestamp) timestamp= hourly_timestamp;
-if(timestamp<daily_timestamp) timestamp= daily_timestamp;
-
-// get and process minutely diff files from last minutely timestamp
-// backward; stop just before latest hourly timestamp or OSM
-// file timestamp has been reached;
-if(minutely_timestamp!=0) {
-  next_timestamp= timestamp;
-  while(next_timestamp>hourly_timestamp &&
-        next_timestamp>old_timestamp) {
-    timestamp= next_timestamp;
-    process_changefile(cft_MINUTELY,minutely_sequence_number,timestamp);
-    minutely_sequence_number--;
-    next_timestamp= get_changefile_timestamp(
-					     cft_MINUTELY,minutely_sequence_number);
   }
- }
 
-// get and process hourly diff files from last hourly timestamp
-// backward; stop just before last daily timestamp or OSM
-// file timestamp has been reached;
-if(hourly_timestamp!=0) {
-  next_timestamp= timestamp;
-  while(next_timestamp>daily_timestamp &&
-        next_timestamp>old_timestamp) {
-    timestamp= next_timestamp;
-    process_changefile(cft_HOURLY,hourly_sequence_number,timestamp);
-    hourly_sequence_number--;
-    next_timestamp= get_changefile_timestamp(
-					     cft_HOURLY,hourly_sequence_number);
+  // take care of user defined processing categories
+  if(process_minutely || process_hourly || process_daily) {
+    if(!process_minutely) no_minutely= true;
+    if(!process_hourly) no_hourly= true;
+    if(!process_daily) no_daily= true;
   }
- }
 
-// get and process daily diff files from last daily timestamp
-// backward; stop just before OSM file timestamp has been reached;
-if(daily_timestamp!=0) {
-  next_timestamp= timestamp;
-  while(next_timestamp>old_timestamp) {
-    timestamp= next_timestamp;
-    process_changefile(cft_DAILY,daily_sequence_number,timestamp);
-    daily_sequence_number--;
-    next_timestamp= get_changefile_timestamp(
-					     cft_DAILY,daily_sequence_number);
+  // get last timestamp for each, minutely, hourly and daily diff files
+  minutely_sequence_number= hourly_sequence_number=
+    daily_sequence_number= 0;
+  minutely_timestamp= hourly_timestamp= daily_timestamp= 0;
+  if(!no_minutely) {
+    minutely_timestamp= get_newest_changefile_timestamp(cft_MINUTELY,&minutely_sequence_number);
+    if(minutely_timestamp==0) {
+      PERR("Could not get the newest minutely timestamp from the Internet.")
+	return 1;
+    }
   }
- }
-
-// process remaining files which may still wait in the cache;
-process_changefile(0,0,0);
-
-/* create requested output file */ {
-  char master_cachefile_name[400];
-  char command[2000],*command_p;
-  char* command_e= command+sizeof(command);
-  char result[1000];
-
-  strcpy(stpmcpy(master_cachefile_name,global_tempfile_name,
-		 sizeof(master_cachefile_name)-5),".8");
-  if(!file_exists(master_cachefile_name)) {
-    if(old_file==NULL)
-      PINFO("There is no changefile since this timestamp.")
-      else 
-        PINFO("Your OSM file is already up-to-date.")
-	  return 21;
+  if(!no_hourly) {
+    hourly_timestamp= get_newest_changefile_timestamp(
+						      cft_HOURLY,&hourly_sequence_number);
+    if(hourly_timestamp==0) {
+      PERR("Could not get the newest hourly timestamp from the Internet.")
+	return 1;
+    }
   }
-  command_p= command;
-  if(new_file_is_changefile) {  // changefile
-    if(new_file_is_gz) {  // compressed
-      if(new_file_is_o5) {  // .o5c.gz
-	stecpy(&command_p,command_e,"gzip ");
-	stecpy(&command_p,command_e,global_gzip_parameters);
-	stecpy(&command_p,command_e," <\"");
-	steesccpy(&command_p,command_e,master_cachefile_name);
-	stecpy(&command_p,command_e,"\" >\"");
-	steesccpy(&command_p,command_e,new_file);
-	stecpy(&command_p,command_e,"\"");
-      }
+  if(!no_daily) {
+    daily_timestamp= get_newest_changefile_timestamp(
+						     cft_DAILY,&daily_sequence_number);
+    if(daily_timestamp==0) {
+      PERR("Could not get the newest daily timestamp from the Internet.")
+	return 1;
+    }
+  }
 
-    }  // compressed
-    else {  // uncompressed
+  // check maximum update range
+  if(minutely_timestamp-old_timestamp>max_update_range) {
+    // update range too large
+    int days;
+    days= (int)((minutely_timestamp-old_timestamp+86399)/86400);
+    PERRv("Update range too large: %i days.",days)
+      PINFOv("To allow such a wide range, add: --max-days=%i",days)
+      return 1;
+  }  // update range too large
 
-    }  // uncompressed
-  }  // changefile
-  else {  // OSM file
-#if 0
-    if(loglevel>=2) {
+  // clear last hourly timestamp if
+  // OSM old file's timestamp > latest hourly timestamp - 30 minutes
+  if(old_timestamp>hourly_timestamp-30*60 && !no_minutely)
+    hourly_timestamp= 0;  // (let's take minutely updates)
 
-      PINFOv("of %s",old_file)
-        PINFOv("mc %s",master_cachefile_name)
-        }
-#endif
+  // clear last daily timestamp if
+  // OSM file timestamp > latest daily timestamp - 16 hours
+  if(old_timestamp>daily_timestamp-16*3600 &&
+     !(no_hourly && no_minutely))
+    daily_timestamp= 0;  // (let's take hourly and minutely updates)
 
-  }  // OSM file
-  if(loglevel<2)
-    unlink(master_cachefile_name);
-}  // create requested output file 
+  // initialize start timestamp
+  timestamp= 0;
+  if(timestamp<minutely_timestamp) timestamp= minutely_timestamp;
+  if(timestamp<hourly_timestamp) timestamp= hourly_timestamp;
+  if(timestamp<daily_timestamp) timestamp= daily_timestamp;
 
-// delete tempfiles
-if(global_keep_tempfiles) {  // tempfiles shall be kept
-  if(loglevel>0)
-    PINFO("Keeping temporary files.")
-      }  // tempfiles shall be kept
- else {  // tempfiles shall be deleted
-   char command[500],*command_p,result[1000];
-   char* command_e= command+sizeof(command);
+  // get and process minutely diff files from last minutely timestamp
+  // backward; stop just before latest hourly timestamp or OSM
+  // file timestamp has been reached;
+  if(minutely_timestamp!=0) {
+    next_timestamp= timestamp;
+    while(next_timestamp>hourly_timestamp &&
+	  next_timestamp>old_timestamp) {
+      timestamp= next_timestamp;
+      process_changefile(cft_MINUTELY,minutely_sequence_number,timestamp);
+      minutely_sequence_number--;
+      next_timestamp= get_changefile_timestamp(
+					       cft_MINUTELY,minutely_sequence_number);
+    }
+  }
 
-   if(loglevel>0)
-     PINFO("Deleting temporary files.")
-       command_p= command;
-   stecpy(&command_p,command_e,DELFILE" \"");
-   steesccpy(&command_p,command_e,global_tempfile_name);
-   stecpy(&command_p,command_e,"\".*");
-   shell_command(command,result);
-   rmdir(tempfile_directory);
- }  // tempfiles shall be deleted
+  // get and process hourly diff files from last hourly timestamp
+  // backward; stop just before last daily timestamp or OSM
+  // file timestamp has been reached;
+  if(hourly_timestamp!=0) {
+    next_timestamp= timestamp;
+    while(next_timestamp>daily_timestamp &&
+	  next_timestamp>old_timestamp) {
+      timestamp= next_timestamp;
+      process_changefile(cft_HOURLY,hourly_sequence_number,timestamp);
+      hourly_sequence_number--;
+      next_timestamp= get_changefile_timestamp(
+					       cft_HOURLY,hourly_sequence_number);
+    }
+  }
 
-if(main_return_value==0 && loglevel>0)
-  PINFO("Completed successfully.")
+  // get and process daily diff files from last daily timestamp
+  // backward; stop just before OSM file timestamp has been reached;
+  if(daily_timestamp!=0) {
+    next_timestamp= timestamp;
+    while(next_timestamp>old_timestamp) {
+      timestamp= next_timestamp;
+      process_changefile(cft_DAILY,daily_sequence_number,timestamp);
+      daily_sequence_number--;
+      next_timestamp= get_changefile_timestamp(
+					       cft_DAILY,daily_sequence_number);
+    }
+  }
 
-    return main_return_value;
+  // process remaining files which may still wait in the cache;
+  process_changefile(0,0,0);
+
+  /* create requested output file */ {
+    char master_cachefile_name[400];
+    char command[2000],*command_p;
+    char* command_e= command+sizeof(command);
+    char result[1000];
+
+    strcpy(stpmcpy(master_cachefile_name,global_tempfile_name,
+		   sizeof(master_cachefile_name)-5),".8");
+    if(!file_exists(master_cachefile_name)) {
+      if(old_file==NULL)
+	PINFO("There is no changefile since this timestamp.")
+	else 
+	  PINFO("Your OSM file is already up-to-date.")
+	    return 21;
+    }
+    command_p= command;
+    if(new_file_is_changefile) {  // changefile
+      if(new_file_is_gz) {  // compressed
+	if(new_file_is_o5) {  // .o5c.gz
+	  stecpy(&command_p,command_e,"gzip ");
+	  stecpy(&command_p,command_e,global_gzip_parameters);
+	  stecpy(&command_p,command_e," <\"");
+	  steesccpy(&command_p,command_e,master_cachefile_name);
+	  stecpy(&command_p,command_e,"\" >\"");
+	  steesccpy(&command_p,command_e,new_file);
+	  stecpy(&command_p,command_e,"\"");
+	}
+
+      }  // compressed
+      else {  // uncompressed
+
+      }  // uncompressed
+    }  // changefile
+    else {  // OSM file
+      if(loglevel>=2) {
+
+	PINFOv("of %s",old_file)
+	  PINFOv("mc %s",master_cachefile_name)
+	  }
+
+    }  // OSM file
+    if(loglevel<2)
+      unlink(master_cachefile_name);
+  }  // create requested output file 
+
+  // done delete tempfiles
+  if(loglevel>0) {
+    PINFO("Keeping temporary files.");
+  }
+
+  if(main_return_value==0 && loglevel>0)
+    PINFO("Completed successfully.")
+
+      return main_return_value;
 }  // end   main()
 
