@@ -164,7 +164,7 @@ const char* helptext=
 #include <signal.h>
 #include <sys/stat.h>
 
-typedef enum {false= 0,true= 1} bool;
+#define PRIi32 "i" 
 typedef uint8_t byte;
 typedef unsigned int uint;
 #define isdig(x) isdigit((unsigned char)(x))
@@ -466,7 +466,7 @@ static char global_tempfile_name[450]= "";
 static bool global_keep_tempfiles= false;
 // temporary files shall not be deleted at program end
 
-#define max_number_of_changefiles_in_cache 10000
+
 static int global_max_merge= 7;
 // maximum number of parallely processed changefiles
 static const char* global_gzip_parameters= "";
@@ -803,12 +803,13 @@ static void process_changefile(changefile_type_t changefile_type,int32_t file_se
   // global_max_merge
   // global_tempfile_name
   static bool firstrun= true;
-  static int number_of_changefiles_in_cache= 0;
+
   static int64_t newest_new_timestamp= 0;
   static char master_cachefile_name[400];
   static char master_cachefile_name_temp[400];
-  static char cachefile_name[max_number_of_changefiles_in_cache][400];
-  char command[4000+200*max_number_of_changefiles_in_cache];
+  static char cachefile_name[400];
+  
+  char command[4000+200*10];
   char* command_e= command+sizeof(command);
   char* command_p;
   char result[1000];
@@ -828,8 +829,7 @@ static void process_changefile(changefile_type_t changefile_type,int32_t file_se
     newest_new_timestamp= new_timestamp;
 
   if(file_sequence_number!=0) {  // changefile download requested
-    char* this_cachefile_name=
-      cachefile_name[number_of_changefiles_in_cache];
+    char* this_cachefile_name=      cachefile_name;
     int64_t old_file_length;
     char* sp;
 
@@ -846,35 +846,24 @@ static void process_changefile(changefile_type_t changefile_type,int32_t file_se
     // assemble the URL and download the changefile
     old_file_length= file_length(this_cachefile_name);
 
+    if(old_file_length <= 0)       {
+      
+      PINFOv("%s changefile %i: downloading",    CFTNAME(changefile_type),file_sequence_number);
+      
+      wget_changefile (changefile_type,
+		       file_sequence_number,
+		       this_cachefile_name
+		       );
+      
+      PINFOv("%s changefile %i: download completed",
+	     CFTNAME(changefile_type),file_sequence_number);
+    }    else       {
+      const char * ftypename=CFTNAME(changefile_type);
+      
+      printf("%s changefile %i: already in cache size:%d name :%s\n", ftypename,file_sequence_number, old_file_length, this_cachefile_name);
+    }
     
-    if(loglevel>0 && old_file_length == 0) 
-      {
-	
-	//	if(loglevel>0 && old_file_length<10)       
-	// verbose mode AND file not downloaded yet
-	PINFOv("%s changefile %i: downloading",    CFTNAME(changefile_type),file_sequence_number);
-	
-	wget_changefile (changefile_type,
-			 file_sequence_number,
-			 this_cachefile_name
-			 );
-	
-        PINFOv("%s changefile %i: download completed",
-	       CFTNAME(changefile_type),file_sequence_number)
-	  }
-    else 
-      {
-	const char * typename=CFTNAME(changefile_type);
-	
-	printf("%s changefile %i: already in cache\n", typename,file_sequence_number);
-      }
-    
-    number_of_changefiles_in_cache++;
-    if (number_of_changefiles_in_cache > max_number_of_changefiles_in_cache)
-      {
-	printf("overflow %d\n",number_of_changefiles_in_cache);
-	exit(999);
-      }
+
   }  // changefile download requested
   
 
@@ -960,7 +949,7 @@ int main(int argc,const char** argv) {
     if((strcmp(a,"-v")==0 || strcmp(a,"--verbose")==0 ||
         strzcmp(a,"-v=")==0 || strzcmp(a,"--verbose=")==0) &&
        loglevel==0) {  // test mode - if not given already
-      char* sp;
+      const char* sp;
 
       sp= strchr(a,'=');
       if(sp!=NULL) loglevel= sp[1]-'0'; else loglevel= 1;
@@ -1002,20 +991,6 @@ int main(int argc,const char** argv) {
         gzip_par[0]= '-'; gzip_par[1]= a[20]; gzip_par[2]= 0;
         global_gzip_parameters= gzip_par;
       }
-      continue;  // take next parameter
-    }
-    if(strzcmp(a,"--max-merge=")==0) {
-      // maximum number of parallely processed changefiles
-      global_max_merge= strtouint32(a+12);
-      if(global_max_merge<2) {
-        global_max_merge= 2;
-        PINFO("Range error. Increased to --max-merge=2")
-	  }
-      if(global_max_merge>max_number_of_changefiles_in_cache) {
-        global_max_merge= max_number_of_changefiles_in_cache;
-        PINFOv("Range error. Decreased to --max-merge=%i",
-	       max_number_of_changefiles_in_cache)
-	  }
       continue;  // take next parameter
     }
     if(strzcmp(a,"--minutely")==0) {  // process minutely data
@@ -1245,61 +1220,12 @@ int main(int argc,const char** argv) {
   }
 
   // process remaining files which may still wait in the cache;
-  process_changefile(0,0,0);
-
-  /* create requested output file */ {
-    char master_cachefile_name[400];
-    char command[2000],*command_p;
-    char* command_e= command+sizeof(command);
-    char result[1000];
-
-    strcpy(stpmcpy(master_cachefile_name,global_tempfile_name,
-		   sizeof(master_cachefile_name)-5),".8");
-    if(!file_exists(master_cachefile_name)) {
-      if(old_file==NULL)
-	PINFO("There is no changefile since this timestamp.")
-	else 
-	  PINFO("Your OSM file is already up-to-date.")
-	    return 21;
-    }
-    command_p= command;
-    if(new_file_is_changefile) {  // changefile
-      if(new_file_is_gz) {  // compressed
-	if(new_file_is_o5) {  // .o5c.gz
-	  stecpy(&command_p,command_e,"gzip ");
-	  stecpy(&command_p,command_e,global_gzip_parameters);
-	  stecpy(&command_p,command_e," <\"");
-	  steesccpy(&command_p,command_e,master_cachefile_name);
-	  stecpy(&command_p,command_e,"\" >\"");
-	  steesccpy(&command_p,command_e,new_file);
-	  stecpy(&command_p,command_e,"\"");
-	}
-
-      }  // compressed
-      else {  // uncompressed
-
-      }  // uncompressed
-    }  // changefile
-    else {  // OSM file
-      if(loglevel>=2) {
-
-	PINFOv("of %s",old_file)
-	  PINFOv("mc %s",master_cachefile_name)
-	  }
-
-    }  // OSM file
-    if(loglevel<2)
-      unlink(master_cachefile_name);
-  }  // create requested output file 
-
-  // done delete tempfiles
-  if(loglevel>0) {
-    PINFO("Keeping temporary files.");
-  }
-
+  process_changefile((changefile_type_t)0,0,0);
+  
   if(main_return_value==0 && loglevel>0)
     PINFO("Completed successfully.")
-
+      
       return main_return_value;
 }  // end   main()
+
 
