@@ -553,7 +553,7 @@ static int64_t get_newest_changefile_timestamp(changefile_type_t changefile_type
 
   // first run
   command_p= command;
-  stecpy(&command_p,command_e,	 "wget -q ");
+  stecpy(&command_p,command_e,	 "wget  --tries=10 --retry-connrefused      --waitretry=5 -q ");
   stecpy(&command_p,command_e,global_planet_url);
   switch(changefile_type) {  // changefile type
   case cft_MINUTELY:
@@ -570,6 +570,21 @@ static int64_t get_newest_changefile_timestamp(changefile_type_t changefile_type
   }  // changefile type
   stecpy(&command_p,command_e," -O - 2>&1");
   shell_command(command,result);
+
+    int count =10;
+    while(count){
+      if  (strstr(result,"unable to resolve host address"))
+	{
+	  printf ("going to retry");
+	  shell_command(command,result);
+	  count --;
+	}
+      else
+	{
+	  count =0;
+	}
+    }
+
 
   if(firstrun) {  // first run
     firstrun= false;
@@ -647,7 +662,7 @@ static int64_t get_changefile_timestamp(
   if(file_length(timestamp_cachefile_name)<10) {
     // timestamp has not been downloaded yet
     command_p= command;
-    stecpy(&command_p,command_e,"wget -nv -c ");
+    stecpy(&command_p,command_e,"wget  --tries=10  --retry-connrefused      --waitretry=5 -nv -c ");
     stecpy(&command_p,command_e,global_planet_url);
     if(changefile_type==cft_MINUTELY)
       stecpy(&command_p,command_e,"minute-replicate/");
@@ -668,6 +683,23 @@ static int64_t get_changefile_timestamp(
     steesccpy(&command_p,command_e,timestamp_cachefile_name);
     stecpy(&command_p,command_e,"\" 2>&1");
     shell_command(command,result);
+
+    // look for "unable to resolve host address"
+    int count =10;
+    while(count){
+      if  (strstr(result,"unable to resolve host address"))
+	{
+	  printf ("going to retry");
+	  shell_command(command,result);
+	  count --;
+	}
+      else
+	{
+	  count =0;
+	}
+    }
+
+    
   }  // timestamp has not been downloaded yet
 
   // read the timestamp cache file
@@ -736,7 +768,7 @@ static void wget_changefile (changefile_type_t changefile_type,
   char* command_e= command+sizeof(command);
   command_p= command;
 
-  stecpy(&command_p,command_e,"wget -nv -c ");
+  stecpy(&command_p,command_e,"wget  --tries=10 --retry-connrefused      --waitretry=5 -nv -c ");
   stecpy(&command_p,command_e,global_planet_url);
   
   switch(changefile_type) {  // changefile type
@@ -770,6 +802,22 @@ static void wget_changefile (changefile_type_t changefile_type,
     char result[1000];
 
     shell_command(command,result);
+
+    // look for "unable to resolve host address"
+    int count =10;
+    while(count){
+      if  (strstr(result,"unable to resolve host address"))
+	{
+	  printf ("going to retry");
+	  shell_command(command,result);
+	  count --;
+	}
+      else
+	{
+	  count =0;
+	}
+    }
+
     if(strstr(result,"Wget Command Ok")==NULL) {  // download error
       PERRv("Could not download %s changefile %i",
 	    CFTNAME(changefile_type),file_sequence_number)
