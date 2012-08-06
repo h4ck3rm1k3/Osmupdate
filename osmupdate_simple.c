@@ -498,7 +498,6 @@ static char global_planet_url[400]=
 //------------------------------------------------------------
 
 
-
 static void shell_command(const char* command,char* result) {
   // execute a shell command;
   // command[]: shell command;
@@ -532,6 +531,25 @@ static void shell_command(const char* command,char* result) {
     PINFOv("Got shell command result:\n%s",result);
   }
 }  // end   shell_command()
+
+
+static void shell_command_retry(const char* command,char* result) {
+  shell_command(command,result);
+  int count =30;
+  while(count){
+    if  (strstr(result,"unable to resolve host address"))
+      {
+	printf ("going to retry\n");
+	shell_command(command,result);
+	count --;
+      }
+    else
+      {
+	count =0;
+      }
+  }
+}
+
 
 typedef enum {cft_UNKNOWN,cft_MINUTELY,cft_HOURLY,cft_DAILY} changefile_type_t;
 #define CFTNAME(i)    (i==cft_MINUTELY? "minutely": i==cft_HOURLY? "hourly":    i==cft_DAILY? "daily": "unknown")
@@ -569,22 +587,8 @@ static int64_t get_newest_changefile_timestamp(changefile_type_t changefile_type
     return 0;
   }  // changefile type
   stecpy(&command_p,command_e," -O - 2>&1");
-  shell_command(command,result);
 
-    int count =10;
-    while(count){
-      if  (strstr(result,"unable to resolve host address"))
-	{
-	  printf ("going to retry");
-	  shell_command(command,result);
-	  count --;
-	}
-      else
-	{
-	  count =0;
-	}
-    }
-
+  shell_command_retry(command,result);
 
   if(firstrun) {  // first run
     firstrun= false;
@@ -627,6 +631,19 @@ static int64_t get_newest_changefile_timestamp(changefile_type_t changefile_type
   return changefile_timestamp;
 }  // get_newest_changefile_timestamp
 
+static void  mkpath (changefile_type_t changefile_type,int32_t file_sequence_number)
+{
+  char path[500];
+  char result[1000];
+  sprintf(path,"%s.%c/%03d/%03d/",global_tempfile_name,CFTNAME(changefile_type)[0], file_sequence_number/1000000,file_sequence_number/1000%1000);
+  struct stat status;
+  stat( path, &status );
+  if ( !(status.st_mode & S_IFDIR )) {
+    sprintf(path,"mkdir -p %s.%c/%03d/%03d/",global_tempfile_name,CFTNAME(changefile_type)[0], file_sequence_number/1000000,file_sequence_number/1000%1000);
+    shell_command(path,result);
+  }
+}
+
 static int64_t get_changefile_timestamp(
 					changefile_type_t changefile_type,int32_t file_sequence_number) {
   // download and inspect the timestamp of a specific changefile which
@@ -650,13 +667,19 @@ static int64_t get_changefile_timestamp(
 
   // create the file name for the cached timestamp; example:
   // "osmupdate_temp/temp.m000012345.txt"
+
   sp= stpmcpy(timestamp_cachefile_name,global_tempfile_name,
 	      sizeof(timestamp_cachefile_name[0])-20);
   *sp++= '.';
   *sp++= CFTNAME(changefile_type)[0];
   // 'm', 'h', 'd' for minutely, hourly or daily timestamps
-  sprintf(sp,"%09"PRIi32".txt",file_sequence_number);
+  //sprintf(sp,"/%09"PRIi32".txt",file_sequence_number);
+  sprintf(sp,"/%03d/%03d/%03d.txt",	    file_sequence_number/1000000,file_sequence_number/1000%1000,   file_sequence_number%1000    );
+
   // add sequence number and file name extension
+
+  mkpath(changefile_type,file_sequence_number);
+
 
   // download the timestamp into a cache file
   if(file_length(timestamp_cachefile_name)<10) {
@@ -682,23 +705,8 @@ static int64_t get_changefile_timestamp(
     stecpy(&command_p,command_e,".state.txt -O \"");
     steesccpy(&command_p,command_e,timestamp_cachefile_name);
     stecpy(&command_p,command_e,"\" 2>&1");
-    shell_command(command,result);
 
-    // look for "unable to resolve host address"
-    int count =10;
-    while(count){
-      if  (strstr(result,"unable to resolve host address"))
-	{
-	  printf ("going to retry");
-	  shell_command(command,result);
-	  count --;
-	}
-      else
-	{
-	  count =0;
-	}
-    }
-
+    shell_command_retry(command,result);
     
   }  // timestamp has not been downloaded yet
 
@@ -801,22 +809,7 @@ static void wget_changefile (changefile_type_t changefile_type,
   if (runwget){
     char result[1000];
 
-    shell_command(command,result);
-
-    // look for "unable to resolve host address"
-    int count =10;
-    while(count){
-      if  (strstr(result,"unable to resolve host address"))
-	{
-	  printf ("going to retry");
-	  shell_command(command,result);
-	  count --;
-	}
-      else
-	{
-	  count =0;
-	}
-    }
+    shell_command_retry(command,result);
 
     if(strstr(result,"Wget Command Ok")==NULL) {  // download error
       PERRv("Could not download %s changefile %i",
@@ -830,6 +823,7 @@ static void wget_changefile (changefile_type_t changefile_type,
       printf("Skipping running %s\n",command);
     }
 }
+
 
 
 static void process_changefile(changefile_type_t changefile_type,int32_t file_sequence_number, int64_t new_timestamp) 
@@ -880,6 +874,7 @@ static void process_changefile(changefile_type_t changefile_type,int32_t file_se
     char* this_cachefile_name=      cachefile_name;
     int64_t old_file_length;
     char* sp;
+    const char* startsp=sp;
 
     // create the file name for the cached changefile; example:
     // "osmupdate_temp/temp.m000012345.osc.gz"
@@ -888,7 +883,13 @@ static void process_changefile(changefile_type_t changefile_type,int32_t file_se
     *sp++= '.';
     *sp++= CFTNAME(changefile_type)[0];
     // 'm', 'h', 'd' for minutely, hourly or daily changefiles
-    sprintf(sp,"%09"PRIi32".osc.gz",file_sequence_number);
+
+    // make a path 
+    mkpath(changefile_type,file_sequence_number);
+
+    sprintf(sp,"/%03d/%03d/%03d.osc.gz",	    file_sequence_number/1000000,file_sequence_number/1000%1000,   file_sequence_number%1000    );
+   
+
     // add sequence number and file name extension
 
     // assemble the URL and download the changefile
