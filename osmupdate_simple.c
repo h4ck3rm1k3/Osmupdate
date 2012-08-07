@@ -637,11 +637,15 @@ static void  mkpath (changefile_type_t changefile_type,int32_t file_sequence_num
   char result[1000];
   sprintf(path,"%s.%c/%03d/%03d/",global_tempfile_name,CFTNAME(changefile_type)[0], file_sequence_number/1000000,file_sequence_number/1000%1000);
   struct stat status;
-  stat( path, &status );
-  if ( !(status.st_mode & S_IFDIR )) {
+  int stat_status= stat( path, &status );
+  
+  if (( stat_status ==0) && (status.st_mode & S_IFDIR )) {
     sprintf(path,"mkdir -p %s.%c/%03d/%03d/",global_tempfile_name,CFTNAME(changefile_type)[0], file_sequence_number/1000000,file_sequence_number/1000%1000);
     shell_command(path,result);
+  }  else    {
+    printf("Path exists %d %d %s\n",stat_status,status.st_mode,path);
   }
+
 }
 
 static int64_t get_changefile_timestamp(
