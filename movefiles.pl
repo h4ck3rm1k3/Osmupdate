@@ -56,7 +56,7 @@ sub wanted {
 	    my $target= $base . "/" .  "osmupdate_temp/temp.m/${seq1}/${seq2}/${seq3}.${ext}";
 	    my $source = $base . "/" . $name;
 	    move ($source,$target) or die "cannot mv $source to $target with error $! $@";
-	    warn "moved $source to $target\n";
+#	    warn "moved $source to $target\n";
 	}
     }
 }

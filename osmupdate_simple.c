@@ -639,7 +639,7 @@ static void  mkpath (changefile_type_t changefile_type,int32_t file_sequence_num
   struct stat status;
   int stat_status= stat( path, &status );
   
-  if (( stat_status ==0) && (status.st_mode & S_IFDIR )) {
+  if (( stat_status == -1) ) {
     sprintf(path,"mkdir -p %s.%c/%03d/%03d/",global_tempfile_name,CFTNAME(changefile_type)[0], file_sequence_number/1000000,file_sequence_number/1000%1000);
     shell_command(path,result);
   }  else    {
