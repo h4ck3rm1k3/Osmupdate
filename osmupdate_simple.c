@@ -913,7 +913,7 @@ static void process_changefile(changefile_type_t changefile_type,int32_t file_se
     }    else       {
       const char * ftypename=CFTNAME(changefile_type);
       
-      printf("%s changefile %i: already in cache size:%d name :%s\n", ftypename,file_sequence_number, old_file_length, this_cachefile_name);
+      printf("%s changefile %i: already in cache size:%lld name :%s\n", ftypename,file_sequence_number, old_file_length, this_cachefile_name);
     }
     
 
