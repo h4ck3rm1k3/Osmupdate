@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 osmupdate: osmupdate_simple.c
 	g++ osmupdate_simple.c -g -o osmupdate
 
@@ -11,3 +12,9 @@ debug : osmupdate
 clean :
 	rm osmupdate
 
+=======
+all : osmupdate_simple
+
+osmupdate_simple: osmupdate_simple.c
+	g++ osmupdate_simple.c -o osmupdate_simple
+>>>>>>> 77aaa3201dfd80ad1451810541f4dcd1f96dd041
