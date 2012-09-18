@@ -899,9 +899,11 @@ static void process_changefile(changefile_type_t changefile_type,int32_t file_se
     // assemble the URL and download the changefile
     old_file_length= file_length(this_cachefile_name);
 
+    const char * ftypename=CFTNAME(changefile_type);
+
     if(old_file_length <= 0)       {
-      
-      PINFOv("%s changefile %i: downloading",    CFTNAME(changefile_type),file_sequence_number);
+      printf("%s changefile %i: not in cache size:%d name :%s\n", ftypename,file_sequence_number, old_file_length, this_cachefile_name);
+      PINFOv("%s changefile %i: downloading", ftypename,file_sequence_number);
       
       wget_changefile (changefile_type,
 		       file_sequence_number,
@@ -911,7 +913,7 @@ static void process_changefile(changefile_type_t changefile_type,int32_t file_se
       PINFOv("%s changefile %i: download completed",
 	     CFTNAME(changefile_type),file_sequence_number);
     }    else       {
-      const char * ftypename=CFTNAME(changefile_type);
+
       
       printf("%s changefile %i: already in cache size:%d name :%s\n", ftypename,file_sequence_number, old_file_length, this_cachefile_name);
     }
